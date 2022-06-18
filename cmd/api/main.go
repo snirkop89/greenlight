@@ -17,9 +17,12 @@ import (
 	"github.com/snirkop89/greenlight/internal/data"
 	"github.com/snirkop89/greenlight/internal/jsonlog"
 	"github.com/snirkop89/greenlight/internal/mailer"
+	"github.com/snirkop89/greenlight/internal/vcs"
 )
 
-const version = "1.0.0"
+var (
+	version = vcs.Version()
+)
 
 type config struct {
 	port int
