@@ -19,9 +19,7 @@ import (
 	"github.com/snirkop89/greenlight/internal/vcs"
 )
 
-var (
-	version = vcs.Version()
-)
+var version = vcs.Version()
 
 type config struct {
 	port int
@@ -46,6 +44,9 @@ type config struct {
 	}
 	cors struct {
 		trustedOrigins []string
+	}
+	jwt struct {
+		secret string
 	}
 }
 
@@ -82,6 +83,9 @@ func main() {
 	flag.StringVar(&cfg.smtp.username, "smtp-username", "", "SMTP username")
 	flag.StringVar(&cfg.smtp.password, "smtp-password", "", "SMTP password")
 	flag.StringVar(&cfg.smtp.sender, "smtp-sender", "Greenlight <no-reply@greenlight.ops-p.info>", "SMTP sender")
+
+	// Parse the JWT signing secret from the command-line-flag
+	flag.StringVar(&cfg.jwt.secret, "jwt-secret", "", "JWT SECRET")
 
 	flag.Func("cors-trusted-origins", "Trusted CORS origin (space seperated)", func(s string) error {
 		cfg.cors.trustedOrigins = strings.Fields(s)

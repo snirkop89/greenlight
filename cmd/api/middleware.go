@@ -5,13 +5,13 @@ import (
 	"expvar"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"slices"
-
+	"github.com/pascaldekloe/jwt"
 	"github.com/snirkop89/greenlight/internal/data"
 	"github.com/snirkop89/greenlight/internal/validator"
 	"github.com/tomasen/realip"
@@ -108,13 +108,19 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 
 		token := headerParts[1]
 
-		v := validator.New()
-		if data.ValidateTokenPlaintext(v, token); !v.Valid() {
-			app.invalidAuthenticationTokenResponse(w, r)
-			return
-		}
+		var user *data.User
+		var err error
+		if app.config.jwt.secret != "" {
+			user, err = app.userByJWT(w, r, token)
+		} else {
+			v := validator.New()
+			if data.ValidateTokenPlaintext(v, token); !v.Valid() {
+				app.invalidAuthenticationTokenResponse(w, r)
+				return
+			}
 
-		user, err := app.models.Users.GetForToken(data.ScopeAuthentication, token)
+			user, err = app.models.Users.GetForToken(data.ScopeAuthentication, token)
+		}
 		if err != nil {
 			switch {
 			case errors.Is(err, data.ErrRecordNotFound):
@@ -128,6 +134,32 @@ func (app *application) authenticate(next http.Handler) http.Handler {
 		r = app.contextSetUser(r, user)
 		next.ServeHTTP(w, r)
 	})
+}
+
+var ErrInvalidJWTToken = errors.New("invalid jwt")
+
+func (app *application) userByJWT(w http.ResponseWriter, r *http.Request, token string) (*data.User, error) {
+	// Parse the JWT and extract the claims.
+	claims, err := jwt.HMACCheck([]byte(token), []byte(app.config.jwt.secret))
+	if err != nil {
+		return nil, ErrInvalidJWTToken
+	}
+	if !claims.Valid(time.Now()) {
+		return nil, ErrInvalidJWTToken
+	}
+	if claims.Issuer != "greenlight.jonsnow.com" {
+		return nil, ErrInvalidJWTToken
+	}
+	if !claims.AcceptAudience("greenlight.jonsnow.com") {
+		return nil, ErrInvalidJWTToken
+	}
+	userID, err := strconv.ParseInt(claims.Subject, 10, 64)
+	if err != nil {
+		return nil, ErrInvalidJWTToken
+	}
+
+	// Lookup the user record from the database
+	return app.models.Users.Get(userID)
 }
 
 func (app *application) requiredActivatedUser(next http.HandlerFunc) http.HandlerFunc {
