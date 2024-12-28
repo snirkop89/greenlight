@@ -3,29 +3,23 @@ package data
 import (
 	"context"
 	"database/sql"
+	"slices"
 	"time"
 
 	"github.com/lib/pq"
 )
 
-// Permissions type hold the possible permissions in our app
-// movies:read movies:write
 type Permissions []string
 
 func (p Permissions) Include(code string) bool {
-	for i := range p {
-		if code == p[i] {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(p, code)
 }
 
 type PermissionModel struct {
 	DB *sql.DB
 }
 
-// GetAllForUser returns all permission codes for a specified user
+// GetAllForUser returns all permission codes for a specific user as a Permissions slice.
 func (m PermissionModel) GetAllForUser(userID int64) (Permissions, error) {
 	query := `
 		SELECT permissions.code
@@ -44,15 +38,12 @@ func (m PermissionModel) GetAllForUser(userID int64) (Permissions, error) {
 	defer rows.Close()
 
 	var permissions Permissions
-
 	for rows.Next() {
 		var permission string
-
 		err := rows.Scan(&permission)
 		if err != nil {
 			return nil, err
 		}
-
 		permissions = append(permissions, permission)
 	}
 	if err = rows.Err(); err != nil {

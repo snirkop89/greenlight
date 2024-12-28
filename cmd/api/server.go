@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,10 +17,12 @@ func (app *application) serve() error {
 		Addr:         fmt.Sprintf(":%d", app.config.port),
 		Handler:      app.routes(),
 		IdleTimeout:  time.Minute,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		ErrorLog:     slog.NewLogLogger(app.logger.Handler(), slog.LevelError),
 	}
 
+	// Channel to receive errors returned from graceful shutdown
 	shutdownError := make(chan error)
 
 	go func() {
@@ -27,11 +30,9 @@ func (app *application) serve() error {
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 		s := <-quit
 
-		app.logger.PrintInfo("shutting down server", map[string]string{
-			"signal": s.String(),
-		})
+		app.logger.Info("shutting down server", "signal", s.String())
 
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		err := srv.Shutdown(ctx)
@@ -39,20 +40,12 @@ func (app *application) serve() error {
 			shutdownError <- err
 		}
 
-		// log message we are waiting for any background goroutines
-		app.logger.PrintInfo("completing background tasks", map[string]string{
-			"addr": srv.Addr,
-		})
-
+		app.logger.Info("completing background tasks", "addr", srv.Addr)
 		app.wg.Wait()
 		shutdownError <- nil
 	}()
 
-	// Start the HTTP server
-	app.logger.PrintInfo("starting server", map[string]string{
-		"addr": srv.Addr,
-		"env":  app.config.env,
-	})
+	app.logger.Info("starting server", "addr", srv.Addr, "env", app.config.env)
 
 	err := srv.ListenAndServe()
 	if !errors.Is(err, http.ErrServerClosed) {
@@ -63,10 +56,7 @@ func (app *application) serve() error {
 	if err != nil {
 		return err
 	}
-
-	app.logger.PrintInfo("stopped server", map[string]string{
-		"addr": srv.Addr,
-	})
+	app.logger.Info("stopped server", "addr", srv.Addr)
 
 	return nil
 }

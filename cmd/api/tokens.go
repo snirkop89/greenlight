@@ -10,7 +10,6 @@ import (
 )
 
 func (app *application) createAuthenticationTokenHandler(w http.ResponseWriter, r *http.Request) {
-	// parse the email and password
 	var input struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -32,12 +31,11 @@ func (app *application) createAuthenticationTokenHandler(w http.ResponseWriter, 
 		return
 	}
 
-	// lookup the user
 	user, err := app.models.Users.GetByEmail(input.Email)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrRecordNotFound):
-			app.invalidCredentialResposne(w, r)
+			app.invalidCredentialsResponse(w, r)
 		default:
 			app.serverErrorResponse(w, r, err)
 		}
@@ -49,13 +47,12 @@ func (app *application) createAuthenticationTokenHandler(w http.ResponseWriter, 
 		app.serverErrorResponse(w, r, err)
 		return
 	}
-
 	if !match {
-		app.invalidCredentialResposne(w, r)
+		app.invalidCredentialsResponse(w, r)
 		return
 	}
 
-	// password is correct, so we'll generate a token
+	// Password is corret, generate a 24-hour valid token.
 	token, err := app.models.Tokens.New(user.ID, 24*time.Hour, data.ScopeAuthentication)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)

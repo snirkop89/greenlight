@@ -28,6 +28,7 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		Activated: false,
 	}
 
+	// Generate and store the hashed and plaintext passwords.
 	err = user.Password.Set(input.Password)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
@@ -40,12 +41,11 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// insert the user data to the database
 	err = app.models.Users.Insert(user)
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrDuplicateEmail):
-			v.AddError("email", "invalid data")
+			v.AddError("email", "a user with this email address already exists")
 			app.failedValidationResponse(w, r, v.Errors)
 		default:
 			app.serverErrorResponse(w, r, err)
@@ -53,13 +53,14 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Add "movies:read" permission for a new user
 	err = app.models.Permissions.AddForUser(user.ID, "movies:read")
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
 		return
 	}
 
-	// after the user has been created, create the token
+	// Generate a new activation token for the user.
 	token, err := app.models.Tokens.New(user.ID, 3*24*time.Hour, data.ScopeActivation)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
@@ -67,17 +68,16 @@ func (app *application) registerUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	app.background(func() {
-		data := map[string]interface{}{
-			"activationToken": token.Plaintext,
+		data := map[string]any{
+			"activationToken": token.PlainText,
 			"userID":          user.ID,
 		}
 		err = app.mailer.Send(user.Email, "user_welcome.tmpl", data)
 		if err != nil {
-			app.logger.PrintError(err, nil)
+			app.logger.Error(err.Error())
 		}
 	})
 
-	// return the created user data
 	err = app.writeJSON(w, http.StatusAccepted, envelope{"user": user}, nil)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)
@@ -96,14 +96,11 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 	}
 
 	v := validator.New()
-
 	if data.ValidateTokenPlaintext(v, input.TokenPlaintext); !v.Valid() {
 		app.failedValidationResponse(w, r, v.Errors)
 		return
 	}
 
-	// retrieve the details of the user associated with the token
-	// if none is found, we'll the the client know the token is invalid
 	user, err := app.models.Users.GetForToken(data.ScopeActivation, input.TokenPlaintext)
 	if err != nil {
 		switch {
@@ -122,14 +119,13 @@ func (app *application) activateUserHandler(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		switch {
 		case errors.Is(err, data.ErrEditConflict):
-			app.editConflictResponse(w, r)
+			app.editCOnflictResponse(w, r)
 		default:
 			app.serverErrorResponse(w, r, err)
 		}
 		return
 	}
 
-	// if everything went successfully, then delete all activation tokens for the user
 	err = app.models.Tokens.DeleteAllForUser(data.ScopeActivation, user.ID)
 	if err != nil {
 		app.serverErrorResponse(w, r, err)

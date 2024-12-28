@@ -17,7 +17,7 @@ const (
 )
 
 type Token struct {
-	Plaintext string    `json:"token"`
+	PlainText string    `json:"token"`
 	Hash      []byte    `json:"-"`
 	UserID    int64     `json:"-"`
 	Expiry    time.Time `json:"expiry"`
@@ -37,8 +37,9 @@ func generateToken(userID int64, ttl time.Duration, scope string) (*Token, error
 		return nil, err
 	}
 
-	token.Plaintext = base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(randomBytes)
-	hash := sha256.Sum256([]byte(token.Plaintext))
+	// PlainText token to send in the email
+	token.PlainText = base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(randomBytes)
+	hash := sha256.Sum256([]byte(token.PlainText))
 	token.Hash = hash[:]
 
 	return token, nil
@@ -58,18 +59,16 @@ func (m TokenModel) New(userID int64, ttl time.Duration, scope string) (*Token, 
 	if err != nil {
 		return nil, err
 	}
-
 	err = m.Insert(token)
 	return token, err
 }
 
-// Insert adds the data for a specific token to the token table
 func (m TokenModel) Insert(token *Token) error {
 	query := `
 		INSERT INTO tokens (hash, user_id, expiry, scope)
 		VALUES ($1, $2, $3, $4)`
 
-	args := []interface{}{token.Hash, token.UserID, token.Expiry, token.Scope}
+	args := []any{token.Hash, token.UserID, token.Expiry, token.Scope}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -78,7 +77,6 @@ func (m TokenModel) Insert(token *Token) error {
 	return err
 }
 
-// DeleteAllForUser deletes all tokens for a specific user and scope
 func (m TokenModel) DeleteAllForUser(scope string, userID int64) error {
 	query := `
 		DELETE FROM tokens

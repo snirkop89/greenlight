@@ -1,38 +1,20 @@
-version: '3'
+version: '3.9'
 
 services:
   db:
-    image: postgres:14.2
+    image: postgres:15
     restart: always
     ports:
-      - "5432:5432"
+      - "5466:5432"
     environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=secretpass
-      - POSTGRES_DB=greenlight
-    volumes:
-      - ./volumes/postgres/data:/var/lib/postgresql/data
-    networks:
-      - greenlight_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: greenlight
+      POSTGRES_DB: greenlight
 
-  api:
-    build: .
-    environment:
-      # - GREENLIGHT_DB_DSN="host=db port=5432 user=greenlight dbname=greenlight password=pa55word sslmode=disable"
-      - GREENLIGHT_DB_DSN=postgres://greenlight:pa55word@db:5432/greenlight?sslmode=disable
+  mail:
+    container_name: mailpit
+    image: axllent/mailpit
+    restart: always
     ports:
-      - "4000:4000"
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - greenlight_net
-
-networks:
-  greenlight_net:
-    driver: bridge
+      - "8025:8025" # web
+      - "1025:1025"

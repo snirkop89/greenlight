@@ -14,9 +14,8 @@ import (
 	"github.com/snirkop89/greenlight/internal/validator"
 )
 
-// evenlope type wraps responses with their correspanding object
-type envelope map[string]interface{}
-
+// Retrieve the "id" URL parameters from the request context. If not successful,
+// returns 0 and error.
 func (app *application) readIDParam(r *http.Request) (int64, error) {
 	params := httprouter.ParamsFromContext(r.Context())
 
@@ -24,31 +23,28 @@ func (app *application) readIDParam(r *http.Request) (int64, error) {
 	if err != nil || id < 1 {
 		return 0, errors.New("invalid id parameter")
 	}
-
 	return id, nil
 }
+
+type envelope map[string]any
 
 func (app *application) writeJSON(w http.ResponseWriter, status int, data envelope, headers http.Header) error {
 	js, err := json.MarshalIndent(data, "", "\t")
 	if err != nil {
 		return err
 	}
-
 	js = append(js, '\n')
 
 	for key, value := range headers {
 		w.Header()[key] = value
 	}
-
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	w.Write(js)
-
 	return nil
 }
 
-func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst interface{}) error {
-	// limit the size of the request body to 1MB
+func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst any) error {
 	maxBytes := 1_048_576
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxBytes))
 	dec := json.NewDecoder(r.Body)
@@ -56,44 +52,58 @@ func (app *application) readJSON(w http.ResponseWriter, r *http.Request, dst int
 
 	err := dec.Decode(dst)
 	if err != nil {
+		// If error during decoding, start the triage...
 		var syntaxError *json.SyntaxError
 		var unmarshalTypeError *json.UnmarshalTypeError
 		var invalidUnmarshalError *json.InvalidUnmarshalError
+		var maxBytesError *http.MaxBytesError
 
 		switch {
 		case errors.As(err, &syntaxError):
 			return fmt.Errorf("body contains badly-formed JSON (at character %d)", syntaxError.Offset)
+
+		// https://github.com/olang/go/ssue/24956
 		case errors.Is(err, io.ErrUnexpectedEOF):
-			return errors.New("body contains badly-formed JSON")
+			return fmt.Errorf("body contains badly-formed JSON")
+
 		case errors.As(err, &unmarshalTypeError):
 			if unmarshalTypeError.Field != "" {
 				return fmt.Errorf("body contains incorrect JSON type for field %q", unmarshalTypeError.Field)
 			}
-			return fmt.Errorf("body contains incorrect JSON (at character %d)", unmarshalTypeError.Offset)
+			return fmt.Errorf("body containts incoreect JSON type (at character %d)", unmarshalTypeError.Offset)
+
 		case errors.Is(err, io.EOF):
 			return errors.New("body must not be empty")
-		case strings.HasPrefix(err.Error(), "json: unknown field "):
+
+		case strings.HasPrefix(err.Error(), "json: unknown field"):
 			fieldName := strings.TrimPrefix(err.Error(), "json: unknown field ")
-			return fmt.Errorf("body contains unknown key %s", fieldName)
-		case err.Error() == "http: request body too large":
-			return fmt.Errorf("body must not be larger than %d bytes", maxBytes)
+			return fmt.Errorf("body contains unknown key: %s", fieldName)
+
+		// Return error in base body passed our 1MB limit.
+		case errors.As(err, &maxBytesError):
+			return fmt.Errorf("body must not be larger than %d bytes", maxBytesError.Limit)
+
+		// Will be causes when we don't pass a pointer to the function. Since it's developer fault,
+		// it's ok to panic here.
 		case errors.As(err, &invalidUnmarshalError):
 			panic(err)
+
 		default:
 			return err
 		}
 	}
 
+	// Calling decode again just to make sure there isn' another json object sent.
 	err = dec.Decode(&struct{}{})
-	if err != io.EOF {
-		return errors.New("body must only contains a single JSON value")
+	if !errors.Is(err, io.EOF) {
+		return errors.New("body must only contain a single JSON value")
 	}
 
 	return nil
 }
 
-// readString helper returns a string value from a query string, or the provided
-// default if no matching key found
+// readString returns a string value from the querys string, or the provided default
+// value if no match found.
 func (app *application) readString(qs url.Values, key string, defaultValue string) string {
 	s := qs.Get(key)
 
@@ -104,49 +114,39 @@ func (app *application) readString(qs url.Values, key string, defaultValue strin
 	return s
 }
 
-// readCSV helper returns a []string from a query string, or the provided default
 func (app *application) readCSV(qs url.Values, key string, defaultValue []string) []string {
 	csv := qs.Get(key)
-
 	if csv == "" {
 		return defaultValue
 	}
-
 	return strings.Split(csv, ",")
 }
 
-// readInt helper returns a int value from the query params. if it fails to convert, we return an
-// error using the validaor. If not key is found, returns default value
 func (app *application) readInt(qs url.Values, key string, defaultValue int, v *validator.Validator) int {
 	s := qs.Get(key)
-
 	if s == "" {
 		return defaultValue
 	}
-
 	i, err := strconv.Atoi(s)
 	if err != nil {
-		v.AddError(key, "must be an integer")
+		v.AddError(key, "must be an integer value")
 		return defaultValue
 	}
-
 	return i
 }
 
-// background runs any function in a background go routine,
-// and handles any panic
 func (app *application) background(fn func()) {
 	app.wg.Add(1)
 	go func() {
 		defer app.wg.Done()
-		// recover any panic
+
+		// Recover any panic
 		defer func() {
 			if err := recover(); err != nil {
-				app.logger.PrintError(fmt.Errorf("%s", err), nil)
+				app.logger.Error(fmt.Sprintf("%v", err))
 			}
 		}()
-
+		// Execute the  passed function.
 		fn()
 	}()
-
 }

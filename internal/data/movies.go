@@ -16,41 +16,41 @@ type Movie struct {
 	CreatedAt time.Time `json:"-"`
 	Title     string    `json:"title"`
 	Year      int32     `json:"year,omitempty"`
-	Runtime   Runtime   `json:"runtime,omitempty"` // Movies runtime in minutes
-	Genres    []string  `json:"genres,omitempty"`
-	Version   int32     `json:"version"`
+	// Runtime in minutes
+	Runtime Runtime  `json:"runtime,omitempty"`
+	Genres  []string `json:"genres,omitempty"`
+	// Version starts at one and will be incremented each time the movie is updated
+	Version int32 `json:"version"`
 }
 
 func ValidateMovie(v *validator.Validator, movie *Movie) {
 	v.Check(movie.Title != "", "title", "must be provided")
-	v.Check(len(movie.Title) <= 500, "title", "must not be more than 500 bytes logs")
+	v.Check(len(movie.Title) <= 500, "title", "must not be more than 500 bytes long")
 
 	v.Check(movie.Year != 0, "year", "must be provided")
 	v.Check(movie.Year >= 1888, "year", "must be greater than 1888")
 	v.Check(movie.Year <= int32(time.Now().Year()), "year", "must not be in the future")
 
 	v.Check(movie.Runtime != 0, "runtime", "must be provided")
-	v.Check(movie.Runtime > 0, "runtime", "must be a positive integer")
+	v.Check(movie.Runtime > 0, "runtime", "must be a positive number")
 
 	v.Check(movie.Genres != nil, "genres", "must be provided")
 	v.Check(len(movie.Genres) >= 1, "genres", "must contain at least 1 genre")
-	v.Check(len(movie.Genres) <= 5, "genres", "must not contain more than 5 genres")
-	v.Check(validator.Unique(movie.Genres), "genres", "must not contains duplicate values")
+	v.Check(len(movie.Genres) <= 5, "genres", "must not contain more then 5 genres")
+	v.Check(validator.Unique(movie.Genres), "genres", "must not contain duplicate values")
 }
 
-// MovieModel wraps a sql.DB connection pool
 type MovieModel struct {
 	DB *sql.DB
 }
 
-// Insert accepts a pointer to a movie struct and adds it to the db
 func (m MovieModel) Insert(movie *Movie) error {
 	query := `
-	INSERT INTO MOVIES (title, year, runtime, genres)
-	VALUES ($1, $2, $3, $4)
-	RETURNING id, created_at, version`
+		INSERT INTO movies (title, year, runtime, genres)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id, created_at, version`
 
-	args := []interface{}{movie.Title, movie.Year, movie.Runtime, pq.Array(movie.Genres)}
+	args := []any{movie.Title, movie.Year, movie.Runtime, pq.Array(movie.Genres)}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -64,15 +64,14 @@ func (m MovieModel) Get(id int64) (*Movie, error) {
 	}
 
 	query := `
-	SELECT id, created_at, title, year, runtime, genres, version
-	FROM movies
-	WHERE id = $1`
-
-	var movie Movie
+		SELECT id, created_at, title, year, runtime, genres, version
+		FROM movies
+		WHERE id = $1`
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	var movie Movie
 	err := m.DB.QueryRowContext(ctx, query, id).Scan(
 		&movie.ID,
 		&movie.CreatedAt,
@@ -90,7 +89,6 @@ func (m MovieModel) Get(id int64) (*Movie, error) {
 			return nil, err
 		}
 	}
-
 	return &movie, nil
 }
 
@@ -101,7 +99,7 @@ func (m MovieModel) Update(movie *Movie) error {
 		WHERE id = $5 AND version = $6
 		RETURNING version`
 
-	args := []interface{}{
+	args := []any{
 		movie.Title,
 		movie.Year,
 		movie.Runtime,
@@ -130,9 +128,7 @@ func (m MovieModel) Delete(id int64) error {
 		return ErrRecordNotFound
 	}
 
-	query := `
-		DELETE FROM movies
-		WHERE id = $1`
+	query := `DELETE FROM movies WHERE id = $1`
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -142,7 +138,6 @@ func (m MovieModel) Delete(id int64) error {
 		return err
 	}
 
-	// get the number of rows affected by the query
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
 		return err
@@ -151,13 +146,12 @@ func (m MovieModel) Delete(id int64) error {
 	if rowsAffected == 0 {
 		return ErrRecordNotFound
 	}
-
 	return nil
 }
 
 func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*Movie, Metadata, error) {
 	query := fmt.Sprintf(`
-		SELECT COUNT(*) OVER(), id, created_at, title, year, runtime, genres, version
+		SELECT count(*) OVER(), id, created_at, title, year, runtime, genres, version
 		FROM movies
 		WHERE (to_tsvector('simple', title) @@ plainto_tsquery('simple', $1) OR $1 = '')
 		AND (genres @> $2 OR $2 = '{}')
@@ -167,7 +161,7 @@ func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*M
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	args := []interface{}{title, pq.Array(genres), filters.limit(), filters.offset()}
+	args := []any{title, pq.Array(genres), filters.limit(), filters.offset()}
 
 	rows, err := m.DB.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -180,7 +174,6 @@ func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*M
 
 	for rows.Next() {
 		var movie Movie
-
 		err := rows.Scan(
 			&totalRecords,
 			&movie.ID,
@@ -194,7 +187,6 @@ func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*M
 		if err != nil {
 			return nil, Metadata{}, err
 		}
-
 		movies = append(movies, &movie)
 	}
 	if err := rows.Err(); err != nil {
@@ -202,6 +194,5 @@ func (m MovieModel) GetAll(title string, genres []string, filters Filters) ([]*M
 	}
 
 	metadata := calculateMetadata(totalRecords, filters.Page, filters.PageSize)
-
 	return movies, metadata, nil
 }

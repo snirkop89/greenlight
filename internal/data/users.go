@@ -15,9 +15,9 @@ var (
 	ErrDuplicateEmail = errors.New("duplicate email")
 )
 
-var AnonymousUser *User
+var AnonymousUser = &User{}
 
-// User represent an individual user record in the database
+// User represents an individual user.
 type User struct {
 	ID        int64     `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
@@ -32,9 +32,8 @@ func (u *User) IsAnonymous() bool {
 	return u == AnonymousUser
 }
 
-// password hold the plaintext version and the hashed version of the user's password
 type password struct {
-	plaintext *string
+	plaintext *string // Pointer to distinguish between empty password or not existing in the struct.
 	hash      []byte
 }
 
@@ -43,10 +42,8 @@ func (p *password) Set(plaintextPassword string) error {
 	if err != nil {
 		return err
 	}
-
 	p.plaintext = &plaintextPassword
 	p.hash = hash
-
 	return nil
 }
 
@@ -60,7 +57,6 @@ func (p *password) Matches(plaintextPassword string) (bool, error) {
 			return false, err
 		}
 	}
-
 	return true, nil
 }
 
@@ -72,7 +68,7 @@ func ValidateEmail(v *validator.Validator, email string) {
 func ValidatePasswordPlainText(v *validator.Validator, password string) {
 	v.Check(password != "", "password", "must be provided")
 	v.Check(len(password) >= 8, "password", "must be at least 8 bytes long")
-	v.Check(len(password) <= 72, "password", "must be less than 72 bytes long")
+	v.Check(len(password) <= 72, "password", "must not be more than 72 bytes long")
 }
 
 func ValidateUser(v *validator.Validator, user *User) {
@@ -85,25 +81,22 @@ func ValidateUser(v *validator.Validator, user *User) {
 		ValidatePasswordPlainText(v, *user.Password.plaintext)
 	}
 
-	// if the password hash is nil, we probably forgot to set it somewhere.
-	// sanity check
 	if user.Password.hash == nil {
 		panic("missing password hash for user")
 	}
 }
 
-// DB MODEL
 type UserModel struct {
 	DB *sql.DB
 }
 
 func (m UserModel) Insert(user *User) error {
 	query := `
-		INSERT into users (name, email, password_hash, activated)
+		INSERT INTO users (name, email, password_hash, activated)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id, created_at, version`
 
-	args := []interface{}{user.Name, user.Email, user.Password.hash, user.Activated}
+	args := []any{user.Name, user.Email, user.Password.hash, user.Activated}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -117,7 +110,6 @@ func (m UserModel) Insert(user *User) error {
 			return err
 		}
 	}
-
 	return nil
 }
 
@@ -149,7 +141,6 @@ func (m UserModel) GetByEmail(email string) (*User, error) {
 			return nil, err
 		}
 	}
-
 	return &user, nil
 }
 
@@ -160,7 +151,7 @@ func (m UserModel) Update(user *User) error {
 		WHERE id = $5 AND version = $6
 		RETURNING version`
 
-	args := []interface{}{
+	args := []any{
 		user.Name,
 		user.Email,
 		user.Password.hash,
@@ -175,7 +166,7 @@ func (m UserModel) Update(user *User) error {
 	err := m.DB.QueryRowContext(ctx, query, args...).Scan(&user.Version)
 	if err != nil {
 		switch {
-		case err.Error() == `pq: duplicate key value violates unique constraint "users_email_key"`:
+		case err.Error() == `pq: duplicate key value violates unique constraint "user_email_key"`:
 			return ErrDuplicateEmail
 		case errors.Is(err, sql.ErrNoRows):
 			return ErrEditConflict
@@ -188,7 +179,6 @@ func (m UserModel) Update(user *User) error {
 }
 
 func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error) {
-	// calculate the sha256 of the token provided by the client
 	tokenHash := sha256.Sum256([]byte(tokenPlaintext))
 
 	query := `
@@ -200,7 +190,7 @@ func (m UserModel) GetForToken(tokenScope, tokenPlaintext string) (*User, error)
 		AND tokens.scope = $2
 		AND tokens.expiry > $3`
 
-	args := []interface{}{tokenHash[:], tokenScope, time.Now()}
+	args := []any{tokenHash[:], tokenScope, time.Now()}
 
 	var user User
 

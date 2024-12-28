@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"embed"
 	"html/template"
-	"log"
 	"time"
 
 	"github.com/go-mail/mail/v2"
@@ -14,20 +13,15 @@ import (
 var templateFS embed.FS
 
 type Mailer struct {
-	// dailer used to connect to a SMTP server
 	dialer *mail.Dialer
-	// The address you want the email's "from" to be
 	sender string
 }
 
 func New(host string, port int, username, password, sender string) Mailer {
-	dailer := mail.NewDialer(host, port, username, password)
-	dailer.Timeout = 10 * time.Second
+	dialer := mail.NewDialer(host, port, username, password)
+	dialer.Timeout = 5 * time.Second
 
-	return Mailer{
-		dialer: dailer,
-		sender: sender,
-	}
+	return Mailer{dialer: dialer, sender: sender}
 }
 
 func (m Mailer) Send(recipient, templateFile string, data any) error {
@@ -35,7 +29,6 @@ func (m Mailer) Send(recipient, templateFile string, data any) error {
 	if err != nil {
 		return err
 	}
-
 	subject := new(bytes.Buffer)
 	err = tmpl.ExecuteTemplate(subject, "subject", data)
 	if err != nil {
@@ -47,7 +40,6 @@ func (m Mailer) Send(recipient, templateFile string, data any) error {
 	if err != nil {
 		return err
 	}
-	log.Println(plainBody.String())
 
 	htmlBody := new(bytes.Buffer)
 	err = tmpl.ExecuteTemplate(htmlBody, "htmlBody", data)
@@ -55,7 +47,6 @@ func (m Mailer) Send(recipient, templateFile string, data any) error {
 		return err
 	}
 
-	// build the mail message
 	msg := mail.NewMessage()
 	msg.SetHeader("To", recipient)
 	msg.SetHeader("From", m.sender)
@@ -63,10 +54,14 @@ func (m Mailer) Send(recipient, templateFile string, data any) error {
 	msg.SetBody("text/plain", plainBody.String())
 	msg.AddAlternative("text/html", htmlBody.String())
 
-	err = m.dialer.DialAndSend(msg)
-	if err != nil {
-		return err
+	// Try sending three times before erroring
+	for i := 1; i < 3; i++ {
+		err = m.dialer.DialAndSend(msg)
+		if err == nil { // NO ERROR, mail sent
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
 
-	return nil
+	return err
 }

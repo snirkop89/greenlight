@@ -14,9 +14,9 @@ type Runtime int32
 func (r Runtime) MarshalJSON() ([]byte, error) {
 	jsonValue := fmt.Sprintf("%d mins", r)
 
-	quotedJSONValue := strconv.Quote(jsonValue)
+	quotedJsonValue := strconv.Quote(jsonValue)
 
-	return []byte(quotedJSONValue), nil
+	return []byte(quotedJsonValue), nil
 }
 
 func (r *Runtime) UnmarshalJSON(jsonValue []byte) error {
@@ -25,12 +25,14 @@ func (r *Runtime) UnmarshalJSON(jsonValue []byte) error {
 		return ErrInvalidRuntimeFormat
 	}
 
+	// Split the string to isolate the number.
 	parts := strings.Split(unquotedJSONValue, " ")
+
 	if len(parts) != 2 || parts[1] != "mins" {
 		return ErrInvalidRuntimeFormat
 	}
 
-	i, err := strconv.ParseInt(string(parts[0]), 10, 32)
+	i, err := strconv.ParseInt(parts[0], 10, 32)
 	if err != nil {
 		return ErrInvalidRuntimeFormat
 	}
